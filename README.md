@@ -2,16 +2,16 @@
 
 Lagequalität von Adressen vergleichen: Adressen eingeben, Kategorien (Supermarkt, Apotheke, Schule, …) wählen – immocompare zeigt die nächstgelegenen Orte auf einer Karte und stellt die Entfernungen tabellarisch gegenüber.
 
-## Testversion 0.2 – Umfang
+## Testversion 0.3 – Umfang
 
 - Bis zu 5 Adressen mit Geocoding (Geoapify Geocoding API) und farbcodierten Markern
-- 11 vordefinierte Kategorien (inkl. Café und Restaurant) (Geoapify Places API, Datenbasis OpenStreetMap)
+- 12 vordefinierte Kategorien (inkl. Café, Restaurant, Bad/Badesee) (Geoapify Places API, Datenbasis OpenStreetMap)
 - Nächstgelegene Treffer je Kategorie (Radius 2 km, Top 3)
 - Karte (Leaflet) mit Verbindungslinien zum jeweils nächsten Treffer
 - Vergleichstabelle mit Bestwert-Hervorhebung
-- Entfernungen: **nur Luftlinie** (Haversine)
+- Entfernungen: Luftlinie (Haversine) sowie **Auto- und Radzeiten** zum jeweils nächstgelegenen Treffer (Geoapify Route Matrix API, progressiv nachgeladen)
 
-Noch nicht enthalten (siehe [Spec](docs/spec.md)): Fußweg/Fahrzeit (Routing), eigene Kategorien, Teilen per Link, Local-Storage-Persistenz, CSV-Export.
+Noch nicht enthalten (siehe [Spec](docs/spec.md)): Fußweg-Routing, eigene Kategorien, Teilen per Link, Local-Storage-Persistenz, CSV-Export.
 
 ## Starten
 
@@ -38,6 +38,6 @@ Geocoding und POI-Suche laufen über [Geoapify](https://www.geoapify.com/) (OSM-
 
 ## Roadmap (Kurzfassung)
 
-- **v0.3:** Fußweg-/Fahrzeit-Routing (Geoapify Routing API), Teilen per URL, Local Storage
-- **v0.4:** eigene Kategorien, konfigurierbarer Radius, CSV-Export
+- **v0.4:** Fußweg-Modus, Teilen per URL, Local Storage
+- **v0.5:** eigene Kategorien, konfigurierbarer Radius, CSV-Export
 - Details: [docs/spec.md](docs/spec.md)

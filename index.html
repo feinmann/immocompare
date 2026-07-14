@@ -63,7 +63,7 @@
 <body>
 <header>
   <h1>immo<span class="co">compare</span></h1>
-  <span>Testversion 0.2.1 · Entfernungen als Luftlinie · Daten: OpenStreetMap</span>
+  <span>Testversion 0.3 · Luftlinie + Auto- &amp; Radzeiten · Daten: OpenStreetMap</span>
 </header>
 
 <div class="layout">
@@ -100,7 +100,7 @@
 </div>
 
 <footer>
-  immocompare v0.2.1 · Geocoding &amp; POIs: Powered by <a href="https://www.geoapify.com/">Geoapify</a> · Daten: © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>-Mitwirkende · Routing (Fußweg/Fahrzeit) folgt in der nächsten Version.
+  immocompare v0.3 · Geocoding &amp; POIs: Powered by <a href="https://www.geoapify.com/">Geoapify</a> · Daten: © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>-Mitwirkende · Routing: Geoapify Route Matrix API.
 </footer>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
@@ -125,6 +125,7 @@ const CATEGORIES = [
   { id:"spielplatz", name:"Spielplatz",  gcat:"leisure.playground",               icon:"🛝", on:false },
   { id:"cafe",       name:"Café",        gcat:"catering.cafe",                    icon:"☕", on:false },
   { id:"restaurant", name:"Restaurant",  gcat:"catering.restaurant",              icon:"🍽️", on:false },
+  { id:"baden",      name:"Bad/Badesee", gcat:"sport.swimming_pool,beach,leisure.spa.public_bath", icon:"🏊", on:false },
   { id:"oepnv",      name:"ÖPNV-Halt",   gcat:"public_transport",                 icon:"🚌", on:false },
   { id:"park",       name:"Park",        gcat:"leisure.park",                     icon:"🌳", on:false },
 ];
@@ -262,7 +263,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 // limit=10 liefert garantiert die nächstgelegenen Treffer dieser Kategorie.
 async function placesFetch(addr, cat) {
   const url = "https://api.geoapify.com/v2/places"
-    + "?categories=" + encodeURIComponent(cat.gcat)
+    + "?categories=" + cat.gcat.split(",").map(encodeURIComponent).join(",")
     + `&filter=circle:${addr.lon},${addr.lat},${RADIUS_M}`
     + `&bias=proximity:${addr.lon},${addr.lat}`
     + "&limit=10&lang=de&apiKey=" + GEOAPIFY_KEY;
@@ -311,7 +312,7 @@ async function analyze() {
     state.results = { active, data: results };
     renderMapResults();
     renderTable();
-    setStatus("Fertig. Entfernungen sind Luftlinie; Fußweg/Fahrzeit folgen in v0.3.");
+    await loadRouting(); // Auto-/Radzeiten asynchron nachladen
   } catch (err) {
     setStatus(err.message);
   } finally {
@@ -319,20 +320,79 @@ async function analyze() {
   }
 }
 
+// ---------- Routing (Route Matrix API) ----------
+const ROUTE_MODES = [
+  { id: "drive",   label: "Auto", icon: "🚗" },
+  { id: "bicycle", label: "Rad",  icon: "🚲" }
+];
+const fmtMin = s => Math.max(1, Math.round(s / 60)) + " min";
+
+async function matrixFetch(mode, source, targets) {
+  const res = await fetch("https://api.geoapify.com/v1/routematrix?apiKey=" + GEOAPIFY_KEY, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      mode,
+      sources: [{ location: [source.lon, source.lat] }],
+      targets: targets.map(t => ({ location: [t.lon, t.lat] }))
+    })
+  });
+  if (!res.ok) throw new Error("Routing fehlgeschlagen (HTTP " + res.status + ")");
+  return res.json();
+}
+
+// Berechnet je Adresse und Modus die Zeiten zum jeweils nächstgelegenen POI jeder Kategorie.
+async function loadRouting() {
+  const { active, data } = state.results;
+  for (const addr of state.addresses) {
+    const pois = active.map(c => data[addr.id][c.id]?.[0]).filter(Boolean);
+    if (!pois.length) continue;
+    for (const mode of ROUTE_MODES) {
+      setStatus(`Berechne ${mode.label}-Zeiten für ${addr.label} …`);
+      try {
+        const m = await matrixFetch(mode.id, addr, pois);
+        const row = (m.sources_to_targets && m.sources_to_targets[0]) || [];
+        row.forEach((cell, j) => {
+          const p = pois[cell.target_index ?? j];
+          if (p && cell && cell.time != null) {
+            (p.route ??= {})[mode.id] = { time: cell.time, distance: cell.distance };
+          }
+        });
+        renderTable(); // progressiv aktualisieren
+      } catch (e) {
+        console.warn("Routing (" + mode.id + ", " + addr.label + "):", e.message);
+      }
+      await sleep(200);
+    }
+  }
+  renderMapResults(); // Popups/Tooltips mit Zeiten neu aufbauen
+  setStatus("Fertig: Luftlinie, Auto- und Radzeiten (jeweils zum nächstgelegenen Treffer).");
+}
+
+function routeStr(p, withPlaceholder) {
+  const rt = p.route || {};
+  const parts = ROUTE_MODES
+    .map(m => rt[m.id] ? `${m.icon} ${fmtMin(rt[m.id].time)}` : (withPlaceholder ? `${m.icon} …` : null))
+    .filter(Boolean);
+  return parts.join(" · ");
+}
+
 // ---------- Ergebnis-Darstellung ----------
 function renderMapResults() {
+  poiLayer.clearLayers(); lineLayer.clearLayers();
   const { active, data } = state.results;
   for (const addr of state.addresses) {
     for (const c of active) {
       (data[addr.id][c.id] || []).forEach((p, idx) => {
+        const routes = routeStr(p, false);
         const mk = L.marker([p.lat, p.lon], {
           icon: L.divIcon({ className: "", html: `<div style="font-size:18px;filter:drop-shadow(0 1px 1px rgba(0,0,0,.4))">${c.icon}</div>`, iconSize: [20, 20], iconAnchor: [10, 10] })
-        }).bindPopup(`<b>${esc(p.name)}</b><br>${esc(c.name)}<br>${esc(addr.label)}: ${fmt(p.dist)} Luftlinie`);
+        }).bindPopup(`<b>${esc(p.name)}</b><br>${esc(c.name)}<br>${esc(addr.label)}: ${fmt(p.dist)} Luftlinie${routes ? "<br>" + routes : ""}`);
         mk.addTo(poiLayer);
         if (idx === 0) {
           L.polyline([[addr.lat, addr.lon], [p.lat, p.lon]],
             { color: addr.color, weight: 2, dashArray: "5 6", opacity: .85 })
-            .bindTooltip(`${c.icon} ${fmt(p.dist)}`)
+            .bindTooltip(`${c.icon} ${fmt(p.dist)}${routes ? " · " + routes : ""}`)
             .addTo(lineLayer);
         }
       });
@@ -357,7 +417,7 @@ function renderTable() {
         html += `<td class="none">kein Treffer im Umkreis von ${RADIUS_M / 1000} km</td>`;
       } else {
         const best = bests[i] === bestVal && isFinite(bestVal) && state.addresses.length > 1;
-        html += `<td class="${best ? "best" : ""}"><span class="poi">${esc(hit.name)}</span><br><span class="dist">${fmt(hit.dist)} Luftlinie</span></td>`;
+        html += `<td class="${best ? "best" : ""}"><span class="poi">${esc(hit.name)}</span><br><span class="dist">${fmt(hit.dist)} Luftlinie</span><br><span class="dist">${routeStr(hit, true)}</span></td>`;
       }
     });
     html += "</tr>";
