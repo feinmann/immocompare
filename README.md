@@ -2,16 +2,18 @@
 
 Lagequalität von Adressen vergleichen: Adressen eingeben, Kategorien (Supermarkt, Apotheke, Schule, …) wählen – immocompare zeigt die nächstgelegenen Orte auf einer Karte und stellt die Entfernungen tabellarisch gegenüber.
 
-## Testversion 0.3 – Umfang
+## Testversion 0.4 – Umfang
 
 - Bis zu 5 Adressen mit Geocoding (Geoapify Geocoding API) und farbcodierten Markern
-- 12 vordefinierte Kategorien (inkl. Café, Restaurant, Bad/Badesee) (Geoapify Places API, Datenbasis OpenStreetMap)
+- 13 vordefinierte Kategorien (inkl. Café, Restaurant, Bad/Badesee) (Geoapify Places API, Datenbasis OpenStreetMap)
 - Nächstgelegene Treffer je Kategorie (Radius 2 km, Top 3)
 - Karte (Leaflet) mit Verbindungslinien zum jeweils nächsten Treffer
 - Vergleichstabelle mit Bestwert-Hervorhebung
-- Entfernungen: Luftlinie (Haversine) sowie **Auto- und Radzeiten** zum jeweils nächstgelegenen Treffer (Geoapify Route Matrix API, progressiv nachgeladen)
+- Entfernungen: **Fußweg-, Auto- und Radzeiten** zum jeweils nächstgelegenen Treffer (Geoapify Route Matrix API, progressiv nachgeladen); Luftlinie als Zusatzinfo in Klammern
+- Bestwert je Kategorie nach **Fußweg-Zeit** (Fallback Luftlinie, solange Routing lädt)
+- Kategorie-Häkchen wirken nach der Analyse als Sichtbarkeits-Schalter für Karte und Tabelle (ohne neue API-Anfragen)
 
-Noch nicht enthalten (siehe [Spec](docs/spec.md)): Fußweg-Routing, eigene Kategorien, Teilen per Link, Local-Storage-Persistenz, CSV-Export.
+Noch nicht enthalten (siehe [Spec](docs/spec.md)): eigene Kategorien, Teilen per Link, Local-Storage-Persistenz, CSV-Export.
 
 ## Starten
 
@@ -38,6 +40,6 @@ Geocoding und POI-Suche laufen über [Geoapify](https://www.geoapify.com/) (OSM-
 
 ## Roadmap (Kurzfassung)
 
-- **v0.4:** Fußweg-Modus, Teilen per URL, Local Storage
-- **v0.5:** eigene Kategorien, konfigurierbarer Radius, CSV-Export
+- **v0.5:** Teilen per URL, Local Storage, Modul-Aufteilung des Codes
+- **v0.6:** eigene Kategorien, konfigurierbarer Radius, CSV-Export
 - Details: [docs/spec.md](docs/spec.md)

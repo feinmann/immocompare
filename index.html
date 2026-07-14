@@ -63,7 +63,7 @@
 <body>
 <header>
   <h1>immo<span class="co">compare</span></h1>
-  <span>Testversion 0.3 · Luftlinie + Auto- &amp; Radzeiten · Daten: OpenStreetMap</span>
+  <span>Testversion 0.4 · Fußweg-, Auto- &amp; Radzeiten (Sieger: Fußweg) · Daten: OpenStreetMap</span>
 </header>
 
 <div class="layout">
@@ -90,7 +90,7 @@
     <section class="panel">
       <h2>Karte</h2>
       <div id="map"></div>
-      <div class="legend">Linien zeigen je Kategorie den nächstgelegenen Treffer pro Adresse. Klick auf Marker für Details.</div>
+      <div class="legend">Linien zeigen je Kategorie den nächstgelegenen Treffer pro Adresse. Klick auf Marker für Details. Nach der Analyse blenden die Kategorie-Häkchen Symbole und Tabellenzeilen ein/aus.</div>
     </section>
     <section class="panel">
       <h2>Vergleich</h2>
@@ -100,7 +100,7 @@
 </div>
 
 <footer>
-  immocompare v0.3 · Geocoding &amp; POIs: Powered by <a href="https://www.geoapify.com/">Geoapify</a> · Daten: © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>-Mitwirkende · Routing: Geoapify Route Matrix API.
+  immocompare v0.4 · Geocoding &amp; POIs: Powered by <a href="https://www.geoapify.com/">Geoapify</a> · Daten: © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>-Mitwirkende · Routing: Geoapify Route Matrix API.
 </footer>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
@@ -131,7 +131,7 @@ const CATEGORIES = [
 ];
 
 // ---------- Zustand ----------
-const state = { addresses: [], results: null };
+const state = { addresses: [], results: null, analyzing: false };
 
 // ---------- Karte ----------
 const map = L.map("map").setView([51.163, 10.447], 6); // Deutschland
@@ -139,8 +139,11 @@ L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
   maxZoom: 19, attribution: "© OpenStreetMap-Mitwirkende"
 }).addTo(map);
 const addrLayer = L.layerGroup().addTo(map);
-const poiLayer = L.layerGroup().addTo(map);
-const lineLayer = L.layerGroup().addTo(map);
+// Je Kategorie eine eigene Layergruppe → Symbole per Häkchen ein-/ausblendbar.
+const catGroups = {};
+function clearCatGroups() {
+  for (const id of Object.keys(catGroups)) { map.removeLayer(catGroups[id]); delete catGroups[id]; }
+}
 
 // ---------- Hilfsfunktionen ----------
 const $ = s => document.querySelector(s);
@@ -207,13 +210,14 @@ function addAddress(hit) {
 }
 
 function removeAddress(id) {
+  if (state.analyzing) { setStatus("Bitte warten, bis die laufende Analyse abgeschlossen ist."); return; }
   state.addresses = state.addresses.filter(a => a.id !== id);
   state.addresses.forEach((a, i) => {
     a.label = "Adresse " + String.fromCharCode(65 + i);
     a.color = ADDR_COLORS[i % ADDR_COLORS.length];
   });
   state.results = null;
-  poiLayer.clearLayers(); lineLayer.clearLayers();
+  clearCatGroups();
   $("#tableWrap").innerHTML = "";
   renderAddresses();
 }
@@ -254,6 +258,33 @@ function renderCats() {
 }
 renderCats();
 
+// Nach einer Analyse wirken die Häkchen als Sichtbarkeits-Schalter:
+// Symbole und Tabellenzeilen werden ohne neue API-Anfragen ein-/ausgeblendet.
+$("#cats").addEventListener("change", e => {
+  const id = e.target?.dataset?.id;
+  if (!id || !state.results) return; // vor der ersten Analyse: nur Auswahl
+  const cat = CATEGORIES.find(c => c.id === id);
+  const analyzed = state.results.active.some(c => c.id === id);
+  if (e.target.checked && !analyzed) {
+    setStatus(`„${cat.name}" wurde noch nicht analysiert – bitte „Umfeld analysieren" erneut ausführen.`);
+    return;
+  }
+  updateCatVisibility();
+  renderTable();
+  setStatus("");
+});
+
+function updateCatVisibility() {
+  if (!state.results) return;
+  for (const c of state.results.active) {
+    const g = catGroups[c.id];
+    if (!g) continue;
+    const on = $(`input[data-id="${c.id}"]`).checked;
+    if (on && !map.hasLayer(g)) g.addTo(map);
+    if (!on && map.hasLayer(g)) map.removeLayer(g);
+  }
+}
+
 // ---------- Analyse ----------
 $("#run").addEventListener("click", analyze);
 
@@ -280,7 +311,8 @@ async function analyze() {
   const active = CATEGORIES.filter(c => $(`input[data-id="${c.id}"]`).checked);
   if (!active.length) { setStatus("Mindestens eine Kategorie wählen."); return; }
   $("#run").disabled = true;
-  poiLayer.clearLayers(); lineLayer.clearLayers();
+  state.analyzing = true;
+  clearCatGroups();
 
   // results[addrId][catId] = [{name,lat,lon,dist}, …]
   const results = {};
@@ -312,18 +344,20 @@ async function analyze() {
     state.results = { active, data: results };
     renderMapResults();
     renderTable();
-    await loadRouting(); // Auto-/Radzeiten asynchron nachladen
+    await loadRouting(); // Fußweg-/Auto-/Radzeiten asynchron nachladen
   } catch (err) {
     setStatus(err.message);
   } finally {
+    state.analyzing = false;
     $("#run").disabled = false;
   }
 }
 
 // ---------- Routing (Route Matrix API) ----------
 const ROUTE_MODES = [
-  { id: "drive",   label: "Auto", icon: "🚗" },
-  { id: "bicycle", label: "Rad",  icon: "🚲" }
+  { id: "walk",    label: "Fußweg", icon: "🚶" },
+  { id: "drive",   label: "Auto",   icon: "🚗" },
+  { id: "bicycle", label: "Rad",    icon: "🚲" }
 ];
 const fmtMin = s => Math.max(1, Math.round(s / 60)) + " min";
 
@@ -366,7 +400,7 @@ async function loadRouting() {
     }
   }
   renderMapResults(); // Popups/Tooltips mit Zeiten neu aufbauen
-  setStatus("Fertig: Luftlinie, Auto- und Radzeiten (jeweils zum nächstgelegenen Treffer).");
+  setStatus("Fertig. Sieger je Kategorie nach Fußweg-Zeit (Luftlinie in Klammern).");
 }
 
 function routeStr(p, withPlaceholder) {
@@ -379,45 +413,53 @@ function routeStr(p, withPlaceholder) {
 
 // ---------- Ergebnis-Darstellung ----------
 function renderMapResults() {
-  poiLayer.clearLayers(); lineLayer.clearLayers();
+  clearCatGroups();
   const { active, data } = state.results;
-  for (const addr of state.addresses) {
-    for (const c of active) {
+  for (const c of active) {
+    const g = L.layerGroup();
+    for (const addr of state.addresses) {
       (data[addr.id][c.id] || []).forEach((p, idx) => {
         const routes = routeStr(p, false);
-        const mk = L.marker([p.lat, p.lon], {
+        L.marker([p.lat, p.lon], {
           icon: L.divIcon({ className: "", html: `<div style="font-size:18px;filter:drop-shadow(0 1px 1px rgba(0,0,0,.4))">${c.icon}</div>`, iconSize: [20, 20], iconAnchor: [10, 10] })
-        }).bindPopup(`<b>${esc(p.name)}</b><br>${esc(c.name)}<br>${esc(addr.label)}: ${fmt(p.dist)} Luftlinie${routes ? "<br>" + routes : ""}`);
-        mk.addTo(poiLayer);
+        }).bindPopup(`<b>${esc(p.name)}</b><br>${esc(c.name)}<br>${esc(addr.label)}: ${fmt(p.dist)} Luftlinie${routes ? "<br>" + routes : ""}`)
+          .addTo(g);
         if (idx === 0) {
           L.polyline([[addr.lat, addr.lon], [p.lat, p.lon]],
             { color: addr.color, weight: 2, dashArray: "5 6", opacity: .85 })
             .bindTooltip(`${c.icon} ${fmt(p.dist)}${routes ? " · " + routes : ""}`)
-            .addTo(lineLayer);
+            .addTo(g);
         }
       });
     }
+    catGroups[c.id] = g;
+    if ($(`input[data-id="${c.id}"]`).checked) g.addTo(map);
   }
 }
 
 function renderTable() {
   const { active, data } = state.results;
+  // Nur aktuell angehakte Kategorien anzeigen (Häkchen = Sichtbarkeits-Schalter).
+  const visible = active.filter(c => $(`input[data-id="${c.id}"]`).checked);
   let html = "<table><thead><tr><th>Kategorie</th>";
   for (const a of state.addresses) {
     html += `<th><span class="dot" style="background:${a.color}"></span>${esc(a.label)}</th>`;
   }
   html += "</tr></thead><tbody>";
-  for (const c of active) {
-    const bests = state.addresses.map(a => data[a.id][c.id]?.[0]?.dist ?? Infinity);
-    const bestVal = Math.min(...bests);
+  for (const c of visible) {
+    const hits = state.addresses.map(a => data[a.id][c.id]?.[0]);
+    // Sieger nach Fußweg-Zeit; solange nicht alle Fußweg-Werte vorliegen: Luftlinie.
+    const allWalk = hits.filter(Boolean).length > 0 && hits.every(h => !h || h.route?.walk?.time != null);
+    const vals = hits.map(h => h ? (allWalk ? h.route.walk.time : h.dist) : Infinity);
+    const bestVal = Math.min(...vals);
     html += `<tr><td>${c.icon} <b>${esc(c.name)}</b></td>`;
     state.addresses.forEach((a, i) => {
-      const hit = data[a.id][c.id]?.[0];
+      const hit = hits[i];
       if (!hit) {
         html += `<td class="none">kein Treffer im Umkreis von ${RADIUS_M / 1000} km</td>`;
       } else {
-        const best = bests[i] === bestVal && isFinite(bestVal) && state.addresses.length > 1;
-        html += `<td class="${best ? "best" : ""}"><span class="poi">${esc(hit.name)}</span><br><span class="dist">${fmt(hit.dist)} Luftlinie</span><br><span class="dist">${routeStr(hit, true)}</span></td>`;
+        const best = vals[i] === bestVal && isFinite(bestVal) && state.addresses.length > 1;
+        html += `<td class="${best ? "best" : ""}"><span class="poi">${esc(hit.name)}</span><br><span class="dist">${routeStr(hit, true)}</span><br><span class="dist">(${fmt(hit.dist)} Luftlinie)</span></td>`;
       }
     });
     html += "</tr>";
