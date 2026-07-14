@@ -2,10 +2,10 @@
 
 Lagequalität von Adressen vergleichen: Adressen eingeben, Kategorien (Supermarkt, Apotheke, Schule, …) wählen – immocompare zeigt die nächstgelegenen Orte auf einer Karte und stellt die Entfernungen tabellarisch gegenüber.
 
-## Testversion 0.1 – Umfang
+## Testversion 0.2 – Umfang
 
-- Bis zu 5 Adressen mit Geocoding (Nominatim) und farbcodierten Markern
-- 9 vordefinierte Kategorien (OpenStreetMap-Tags, Overpass API)
+- Bis zu 5 Adressen mit Geocoding (Geoapify Geocoding API) und farbcodierten Markern
+- 9 vordefinierte Kategorien (Geoapify Places API, Datenbasis OpenStreetMap)
 - Nächstgelegene Treffer je Kategorie (Radius 2 km, Top 3)
 - Karte (Leaflet) mit Verbindungslinien zum jeweils nächsten Treffer
 - Vergleichstabelle mit Bestwert-Hervorhebung
@@ -26,13 +26,18 @@ python3 -m http.server 8000
 # → http://localhost:8000
 ```
 
+## Konfiguration
+
+Geocoding und POI-Suche laufen über [Geoapify](https://www.geoapify.com/) (OSM-basiert, Free-Plan: 3.000 Credits/Tag). Der API-Key steht in `index.html` (`GEOAPIFY_KEY`). Eigenen Key unter myprojects.geoapify.com anlegen und dort ersetzen.
+
 ## Hinweise
 
-- Die App nutzt die **öffentlichen** Instanzen von Nominatim und Overpass. Diese sind nur für Entwicklung/Tests geeignet (Rate Limits, Fair-Use-Policy). Für den Produktivbetrieb sind eigene Instanzen oder ein kommerzieller OSM-Anbieter vorgesehen (siehe Spec, Risiko R-1).
-- Daten © OpenStreetMap-Mitwirkende (ODbL). Vollständigkeit der POIs variiert regional.
+- Der Key ist im Client sichtbar. Für den Prototyp akzeptabel; im Geoapify-Dashboard sollte er auf die eigene Domain eingeschränkt werden, für den Produktivbetrieb ist der Backend-Proxy aus der Spec vorgesehen.
+- Nominatim/Overpass werden seit v0.2 nicht mehr genutzt (öffentliche Instanzen waren zu unzuverlässig, siehe Spec Risiko R-1).
+- Daten © OpenStreetMap-Mitwirkende (ODbL), bereitgestellt via Geoapify. Vollständigkeit der POIs variiert regional.
 
 ## Roadmap (Kurzfassung)
 
-- **v0.2:** Fußweg-/Fahrzeit-Routing (OSRM), Teilen per URL, Local Storage
-- **v0.3:** eigene Kategorien, konfigurierbarer Radius, CSV-Export
+- **v0.3:** Fußweg-/Fahrzeit-Routing (Geoapify Routing API), Teilen per URL, Local Storage
+- **v0.4:** eigene Kategorien, konfigurierbarer Radius, CSV-Export
 - Details: [docs/spec.md](docs/spec.md)

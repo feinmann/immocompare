@@ -63,7 +63,7 @@
 <body>
 <header>
   <h1>immo<span class="co">compare</span></h1>
-  <span>Testversion 0.1.1 · Entfernungen als Luftlinie · Daten: OpenStreetMap</span>
+  <span>Testversion 0.2 · Entfernungen als Luftlinie · Daten: OpenStreetMap</span>
 </header>
 
 <div class="layout">
@@ -100,7 +100,7 @@
 </div>
 
 <footer>
-  immocompare v0.1.1 · Geocoding: Nominatim · POIs: Overpass API · Karte: © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>-Mitwirkende · Routing (Fußweg/Fahrzeit) folgt in der nächsten Version.
+  immocompare v0.2 · Geocoding &amp; POIs: Powered by <a href="https://www.geoapify.com/">Geoapify</a> · Daten: © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>-Mitwirkende · Routing (Fußweg/Fahrzeit) folgt in der nächsten Version.
 </footer>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
@@ -108,21 +108,23 @@
 "use strict";
 
 // ---------- Konfiguration ----------
+const GEOAPIFY_KEY = "2d36313a77ad4346a70cc0571ef6f2ef";
 const MAX_ADDR = 5;
 const RADIUS_M = 2000;      // Suchradius je Kategorie
 const TOP_N = 3;            // Treffer je Kategorie & Adresse
 const ADDR_COLORS = ["#E11D48","#2563EB","#D97706","#7C3AED","#059669"];
 
+// gcat = Geoapify-Places-Kategorie (https://apidocs.geoapify.com/docs/places/)
 const CATEGORIES = [
-  { id:"supermarkt", name:"Supermarkt",  filter:'["shop"="supermarket"]',   icon:"🛒", on:true },
-  { id:"baecker",    name:"Bäckerei",    filter:'["shop"="bakery"]',        icon:"🥐", on:false },
-  { id:"apotheke",   name:"Apotheke",    filter:'["amenity"="pharmacy"]',   icon:"💊", on:true },
-  { id:"arzt",       name:"Arztpraxis",  filter:'["amenity"="doctors"]',    icon:"🩺", on:false },
-  { id:"kita",       name:"Kita",        filter:'["amenity"="kindergarten"]',icon:"🧸", on:false },
-  { id:"schule",     name:"Schule",      filter:'["amenity"="school"]',     icon:"🎒", on:false },
-  { id:"spielplatz", name:"Spielplatz",  filter:'["leisure"="playground"]', icon:"🛝", on:false },
-  { id:"oepnv",      name:"ÖPNV-Halt",   filter:'["highway"="bus_stop"]',   icon:"🚌", on:false },
-  { id:"park",       name:"Park",        filter:'["leisure"="park"]',       icon:"🌳", on:false },
+  { id:"supermarkt", name:"Supermarkt",  gcat:"commercial.supermarket",           icon:"🛒", on:true },
+  { id:"baecker",    name:"Bäckerei",    gcat:"commercial.food_and_drink.bakery", icon:"🥐", on:false },
+  { id:"apotheke",   name:"Apotheke",    gcat:"healthcare.pharmacy",              icon:"💊", on:true },
+  { id:"arzt",       name:"Arztpraxis",  gcat:"healthcare.clinic_or_praxis",      icon:"🩺", on:false },
+  { id:"kita",       name:"Kita",        gcat:"childcare.kindergarten",           icon:"🧸", on:false },
+  { id:"schule",     name:"Schule",      gcat:"education.school",                 icon:"🎒", on:false },
+  { id:"spielplatz", name:"Spielplatz",  gcat:"leisure.playground",               icon:"🛝", on:false },
+  { id:"oepnv",      name:"ÖPNV-Halt",   gcat:"public_transport",                 icon:"🚌", on:false },
+  { id:"park",       name:"Park",        gcat:"leisure.park",                     icon:"🌳", on:false },
 ];
 
 // ---------- Zustand ----------
@@ -152,10 +154,16 @@ function setStatus(t){ $("#status").textContent = t; }
 
 // ---------- Adressen ----------
 async function geocode(q) {
-  const url = "https://nominatim.openstreetmap.org/search?format=jsonv2&limit=5&addressdetails=0&q=" + encodeURIComponent(q);
-  const res = await fetch(url, { headers: { "Accept-Language": "de" } });
+  const url = "https://api.geoapify.com/v1/geocode/search?limit=5&lang=de&text="
+    + encodeURIComponent(q) + "&apiKey=" + GEOAPIFY_KEY;
+  const res = await fetch(url);
   if (!res.ok) throw new Error("Geocoding fehlgeschlagen (" + res.status + ")");
-  return res.json();
+  const data = await res.json();
+  return (data.features || []).map(f => ({
+    display_name: f.properties.formatted,
+    lat: f.properties.lat,
+    lon: f.properties.lon
+  }));
 }
 
 $("#searchBtn").addEventListener("click", onSearch);
@@ -247,40 +255,29 @@ renderCats();
 $("#run").addEventListener("click", analyze);
 
 // Öffentliche Overpass-Instanzen; bei 429/504 wird automatisch rotiert.
-const OVERPASS_ENDPOINTS = [
-  "https://overpass-api.de/api/interpreter",
-  "https://overpass.kumi.systems/api/interpreter",
-  "https://overpass.private.coffee/api/interpreter"
-];
-const CHUNK_SIZE = 3;        // Kategorien pro Overpass-Anfrage (klein halten → kein 504)
-const CHUNK_PAUSE_MS = 1500; // Pause zwischen Anfragen (Rate Limit → kein 429)
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
-async function overpassFetch(query, onInfo) {
-  let lastErr = "";
-  for (let attempt = 0; attempt < OVERPASS_ENDPOINTS.length * 2; attempt++) {
-    const ep = OVERPASS_ENDPOINTS[attempt % OVERPASS_ENDPOINTS.length];
-    try {
-      const res = await fetch(ep, {
-        method: "POST",
-        body: "data=" + encodeURIComponent(query),
-        headers: { "Content-Type": "application/x-www-form-urlencoded" }
-      });
-      if (res.ok) return res.json();
-      lastErr = "HTTP " + res.status;
-      if (res.status === 429 || res.status === 504) {
-        const wait = 2000 * (attempt + 1);
-        onInfo(`Server ausgelastet (${res.status}) – neuer Versuch in ${wait / 1000}s …`);
-        await sleep(wait);
-        continue; // nächster Endpoint
-      }
-      throw new Error("Overpass-Anfrage fehlgeschlagen (" + res.status + ").");
-    } catch (e) {
-      lastErr = e.message;
-      await sleep(1500);
-    }
+async function placesFetch(addr, cats) {
+  const catParam = cats.map(c => c.gcat).join(",");
+  const url = "https://api.geoapify.com/v2/places"
+    + "?categories=" + encodeURIComponent(catParam)
+    + `&filter=circle:${addr.lon},${addr.lat},${RADIUS_M}`
+    + `&bias=proximity:${addr.lon},${addr.lat}`
+    + "&limit=100&lang=de&apiKey=" + GEOAPIFY_KEY;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const res = await fetch(url);
+    if (res.ok) return res.json();
+    if (res.status === 429) { await sleep(1200 * (attempt + 1)); continue; }
+    throw new Error("POI-Suche fehlgeschlagen (HTTP " + res.status + ").");
   }
-  throw new Error("Alle Overpass-Server ausgelastet (" + lastErr + ") – bitte in 1–2 Minuten erneut versuchen.");
+  throw new Error("POI-Suche: Rate Limit erreicht – bitte kurz warten und erneut versuchen.");
+}
+
+// Ordnet ein Places-Ergebnis der ersten passenden aktiven Kategorie zu.
+function classify(featureCats, active) {
+  return active.find(c =>
+    (featureCats || []).some(fc => fc === c.gcat || fc.startsWith(c.gcat + "."))
+  );
 }
 
 async function analyze() {
@@ -296,37 +293,22 @@ async function analyze() {
     for (const c of active) results[a.id][c.id] = [];
   }
 
-  // Kategorien in kleine Pakete teilen; je Paket EINE Anfrage für ALLE Adressen.
-  const chunks = [];
-  for (let i = 0; i < active.length; i += CHUNK_SIZE) chunks.push(active.slice(i, i + CHUNK_SIZE));
-
   try {
-    const seen = new Set();
-    for (const [ci, chunk] of chunks.entries()) {
-      setStatus(`Suche ${chunk.map(c => c.name).join(", ")} (${ci + 1}/${chunks.length}) …`);
-      const parts = chunk.flatMap(c =>
-        state.addresses.map(a => `nwr${c.filter}(around:${RADIUS_M},${a.lat},${a.lon});`)
-      ).join("");
-      const query = `[out:json][timeout:60];( ${parts} );out center 600;`;
-      const data = await overpassFetch(query, setStatus);
-
-      for (const el of data.elements) {
-        const key = el.type + "/" + el.id;
-        if (seen.has(key)) continue;
-        seen.add(key);
-        const lat = el.lat ?? el.center?.lat, lon = el.lon ?? el.center?.lon;
-        if (lat == null) continue;
-        const cat = chunk.find(c => matchesFilter(el.tags || {}, c.filter));
+    // Eine Anfrage pro Adresse, alle aktiven Kategorien gebündelt.
+    for (const [i, addr] of state.addresses.entries()) {
+      setStatus(`Suche Umgebung von ${addr.label} (${i + 1}/${state.addresses.length}) …`);
+      const data = await placesFetch(addr, active);
+      for (const f of (data.features || [])) {
+        const p = f.properties || {};
+        if (p.lat == null || p.lon == null) continue;
+        const cat = classify(p.categories, active);
         if (!cat) continue;
-        // Ein POI kann im Radius mehrerer Adressen liegen → allen zuordnen.
-        for (const a of state.addresses) {
-          const dist = haversine(a, { lat, lon });
-          if (dist <= RADIUS_M) {
-            results[a.id][cat.id].push({ name: el.tags?.name || cat.name + " (ohne Namen)", lat, lon, dist });
-          }
-        }
+        results[addr.id][cat.id].push({
+          name: p.name || p.address_line1 || cat.name + " (ohne Namen)",
+          lat: p.lat, lon: p.lon,
+          dist: haversine(addr, { lat: p.lat, lon: p.lon })
+        });
       }
-      if (ci < chunks.length - 1) await sleep(CHUNK_PAUSE_MS);
     }
 
     for (const a of state.addresses) {
@@ -338,17 +320,12 @@ async function analyze() {
     state.results = { active, data: results };
     renderMapResults();
     renderTable();
-    setStatus("Fertig. Entfernungen sind Luftlinie; Fußweg/Fahrzeit folgen in v0.2.");
+    setStatus("Fertig. Entfernungen sind Luftlinie; Fußweg/Fahrzeit folgen in v0.3.");
   } catch (err) {
     setStatus(err.message);
   } finally {
     $("#run").disabled = false;
   }
-}
-
-function matchesFilter(tags, filter) {
-  const m = filter.match(/\["([^"]+)"="([^"]+)"\]/);
-  return m ? tags[m[1]] === m[2] : false;
 }
 
 // ---------- Ergebnis-Darstellung ----------
