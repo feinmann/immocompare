@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>immocompare – Lagevergleich für Adressen</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Familjen+Grotesk:wght@500;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#F2F5F7; --surface:#FFFFFF; --ink:#22303C; --muted:#66707B;
+    --line:#DDE4E9; --accent:#0F766E; --best:#E7F6EF; --best-ink:#0B6B47;
+    --radius:10px;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--ink);font-size:14px}
+  h1,h2,h3{font-family:'Familjen Grotesk',sans-serif;margin:0}
+  header{display:flex;align-items:baseline;gap:12px;padding:14px 20px;background:var(--surface);border-bottom:1px solid var(--line)}
+  header h1{font-size:20px;letter-spacing:-.01em}
+  header h1 .co{color:var(--accent)}
+  header span{color:var(--muted);font-size:13px}
+  .layout{display:grid;grid-template-columns:340px 1fr;gap:16px;padding:16px;max-width:1500px;margin:0 auto}
+  @media(max-width:900px){.layout{grid-template-columns:1fr}}
+  .panel{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:16px}
+  .panel h2{font-size:15px;margin-bottom:10px}
+  .panel + .panel{margin-top:16px}
+  .row{display:flex;gap:8px}
+  input[type=text]{flex:1;padding:9px 10px;border:1px solid var(--line);border-radius:8px;font:inherit}
+  input[type=text]:focus{outline:2px solid var(--accent);outline-offset:0;border-color:var(--accent)}
+  button{font:inherit;font-weight:600;border:0;border-radius:8px;padding:9px 14px;cursor:pointer;background:var(--accent);color:#fff}
+  button.ghost{background:transparent;color:var(--muted);padding:4px 6px;font-weight:500}
+  button:disabled{opacity:.5;cursor:default}
+  #suggestions{margin-top:6px;display:flex;flex-direction:column;gap:4px}
+  #suggestions button{background:var(--bg);color:var(--ink);text-align:left;font-weight:500;font-size:13px}
+  .addr{display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid var(--line)}
+  .addr:last-child{border-bottom:0}
+  .dot{width:12px;height:12px;border-radius:50%;flex:none}
+  .addr .label{flex:1;min-width:0}
+  .addr .label b{display:block;font-size:13px}
+  .addr .label small{color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:block}
+  .cats{display:flex;flex-wrap:wrap;gap:6px}
+  .cats label{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);border-radius:999px;padding:5px 11px;cursor:pointer;user-select:none}
+  .cats label:has(input:checked){border-color:var(--accent);background:#F0FAF8;color:var(--accent);font-weight:600}
+  .cats input{accent-color:var(--accent)}
+  #run{width:100%;margin-top:14px;padding:11px}
+  #status{margin-top:8px;color:var(--muted);font-size:13px;min-height:18px}
+  #map{height:460px;border-radius:var(--radius);border:1px solid var(--line)}
+  table{width:100%;border-collapse:collapse;margin-top:12px;font-variant-numeric:tabular-nums}
+  th,td{text-align:left;padding:9px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);font-weight:600}
+  th .dot{display:inline-block;margin-right:6px;vertical-align:-1px}
+  td .poi{font-weight:600;font-size:13px}
+  td .dist{color:var(--muted);font-size:13px}
+  td.best{background:var(--best)}
+  td.best .dist{color:var(--best-ink);font-weight:600}
+  td.none{color:var(--muted);font-style:italic}
+  footer{padding:14px 20px;color:var(--muted);font-size:12px;text-align:center}
+  a{color:var(--accent)}
+  .legend{font-size:12px;color:var(--muted);margin-top:8px}
+</style>
+</head>
+<body>
+<header>
+  <h1>immo<span class="co">compare</span></h1>
+  <span>Testversion 0.1 · Entfernungen als Luftlinie · Daten: OpenStreetMap</span>
+</header>
+
+<div class="layout">
+  <div>
+    <section class="panel">
+      <h2>1 · Adressen (max. 5)</h2>
+      <div class="row">
+        <input type="text" id="addrInput" placeholder="z. B. Marienplatz 1, München" aria-label="Adresse">
+        <button id="searchBtn">Suchen</button>
+      </div>
+      <div id="suggestions"></div>
+      <div id="addrList"></div>
+    </section>
+
+    <section class="panel">
+      <h2>2 · Kategorien</h2>
+      <div class="cats" id="cats"></div>
+      <button id="run" disabled>Umfeld analysieren</button>
+      <div id="status"></div>
+    </section>
+  </div>
+
+  <div>
+    <section class="panel">
+      <h2>Karte</h2>
+      <div id="map"></div>
+      <div class="legend">Linien zeigen je Kategorie den nächstgelegenen Treffer pro Adresse. Klick auf Marker für Details.</div>
+    </section>
+    <section class="panel">
+      <h2>Vergleich</h2>
+      <div id="tableWrap"><p class="dist" style="color:var(--muted)">Noch keine Analyse. Adresse(n) hinzufügen, Kategorien wählen, dann „Umfeld analysieren“.</p></div>
+    </section>
+  </div>
+</div>
+
+<footer>
+  immocompare v0.1 · Geocoding: Nominatim · POIs: Overpass API · Karte: © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>-Mitwirkende · Routing (Fußweg/Fahrzeit) folgt in der nächsten Version.
+</footer>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+"use strict";
+
+// ---------- Konfiguration ----------
+const MAX_ADDR = 5;
+const RADIUS_M = 2000;      // Suchradius je Kategorie
+const TOP_N = 3;            // Treffer je Kategorie & Adresse
+const ADDR_COLORS = ["#E11D48","#2563EB","#D97706","#7C3AED","#059669"];
+
+const CATEGORIES = [
+  { id:"supermarkt", name:"Supermarkt",  filter:'["shop"="supermarket"]',   icon:"🛒", on:true },
+  { id:"baecker",    name:"Bäckerei",    filter:'["shop"="bakery"]',        icon:"🥐", on:false },
+  { id:"apotheke",   name:"Apotheke",    filter:'["amenity"="pharmacy"]',   icon:"💊", on:true },
+  { id:"arzt",       name:"Arztpraxis",  filter:'["amenity"="doctors"]',    icon:"🩺", on:false },
+  { id:"kita",       name:"Kita",        filter:'["amenity"="kindergarten"]',icon:"🧸", on:false },
+  { id:"schule",     name:"Schule",      filter:'["amenity"="school"]',     icon:"🎒", on:false },
+  { id:"spielplatz", name:"Spielplatz",  filter:'["leisure"="playground"]', icon:"🛝", on:false },
+  { id:"oepnv",      name:"ÖPNV-Halt",   filter:'["highway"="bus_stop"]',   icon:"🚌", on:false },
+  { id:"park",       name:"Park",        filter:'["leisure"="park"]',       icon:"🌳", on:false },
+];
+
+// ---------- Zustand ----------
+const state = { addresses: [], results: null };
+
+// ---------- Karte ----------
+const map = L.map("map").setView([51.163, 10.447], 6); // Deutschland
+L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+  maxZoom: 19, attribution: "© OpenStreetMap-Mitwirkende"
+}).addTo(map);
+const addrLayer = L.layerGroup().addTo(map);
+const poiLayer = L.layerGroup().addTo(map);
+const lineLayer = L.layerGroup().addTo(map);
+
+// ---------- Hilfsfunktionen ----------
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+
+function haversine(a, b) {
+  const R = 6371000, r = Math.PI/180;
+  const dLat = (b.lat-a.lat)*r, dLon = (b.lon-a.lon)*r;
+  const h = Math.sin(dLat/2)**2 + Math.cos(a.lat*r)*Math.cos(b.lat*r)*Math.sin(dLon/2)**2;
+  return 2*R*Math.asin(Math.sqrt(h));
+}
+const fmt = m => m < 950 ? `${Math.round(m/10)*10} m` : `${(m/1000).toFixed(1)} km`;
+function setStatus(t){ $("#status").textContent = t; }
+
+// ---------- Adressen ----------
+async function geocode(q) {
+  const url = "https://nominatim.openstreetmap.org/search?format=jsonv2&limit=5&addressdetails=0&q=" + encodeURIComponent(q);
+  const res = await fetch(url, { headers: { "Accept-Language": "de" } });
+  if (!res.ok) throw new Error("Geocoding fehlgeschlagen (" + res.status + ")");
+  return res.json();
+}
+
+$("#searchBtn").addEventListener("click", onSearch);
+$("#addrInput").addEventListener("keydown", e => { if (e.key === "Enter") onSearch(); });
+
+async function onSearch() {
+  const q = $("#addrInput").value.trim();
+  const box = $("#suggestions");
+  box.innerHTML = "";
+  if (!q) return;
+  if (state.addresses.length >= MAX_ADDR) { setStatus(`Maximal ${MAX_ADDR} Adressen in dieser Testversion.`); return; }
+  setStatus("Suche Adresse …");
+  try {
+    const hits = await geocode(q);
+    setStatus("");
+    if (!hits.length) { setStatus("Keine Adresse gefunden – Eingabe präzisieren."); return; }
+    hits.forEach(h => {
+      const b = document.createElement("button");
+      b.textContent = h.display_name;
+      b.addEventListener("click", () => addAddress(h));
+      box.appendChild(b);
+    });
+  } catch (err) { setStatus(err.message); }
+}
+
+function addAddress(hit) {
+  $("#suggestions").innerHTML = "";
+  $("#addrInput").value = "";
+  const color = ADDR_COLORS[state.addresses.length % ADDR_COLORS.length];
+  state.addresses.push({
+    id: crypto.randomUUID(),
+    label: "Adresse " + String.fromCharCode(65 + state.addresses.length), // A, B, C …
+    display: hit.display_name,
+    lat: parseFloat(hit.lat), lon: parseFloat(hit.lon),
+    color
+  });
+  renderAddresses();
+}
+
+function removeAddress(id) {
+  state.addresses = state.addresses.filter(a => a.id !== id);
+  state.addresses.forEach((a, i) => {
+    a.label = "Adresse " + String.fromCharCode(65 + i);
+    a.color = ADDR_COLORS[i % ADDR_COLORS.length];
+  });
+  state.results = null;
+  poiLayer.clearLayers(); lineLayer.clearLayers();
+  $("#tableWrap").innerHTML = "";
+  renderAddresses();
+}
+
+function renderAddresses() {
+  const el = $("#addrList");
+  el.innerHTML = "";
+  addrLayer.clearLayers();
+  state.addresses.forEach(a => {
+    const row = document.createElement("div");
+    row.className = "addr";
+    row.innerHTML = `<span class="dot" style="background:${a.color}"></span>
+      <span class="label"><b>${esc(a.label)}</b><small title="${esc(a.display)}">${esc(a.display)}</small></span>`;
+    const del = document.createElement("button");
+    del.className = "ghost"; del.textContent = "✕"; del.title = "Adresse entfernen";
+    del.addEventListener("click", () => removeAddress(a.id));
+    row.appendChild(del);
+    el.appendChild(row);
+
+    L.circleMarker([a.lat, a.lon], { radius: 9, color: "#fff", weight: 2, fillColor: a.color, fillOpacity: 1 })
+      .bindPopup(`<b>${esc(a.label)}</b><br>${esc(a.display)}`)
+      .addTo(addrLayer);
+  });
+  if (state.addresses.length) {
+    map.fitBounds(state.addresses.map(a => [a.lat, a.lon]), { padding: [60, 60], maxZoom: 15 });
+  }
+  $("#run").disabled = state.addresses.length === 0;
+}
+
+// ---------- Kategorien ----------
+function renderCats() {
+  const el = $("#cats");
+  CATEGORIES.forEach(c => {
+    const l = document.createElement("label");
+    l.innerHTML = `<input type="checkbox" ${c.on ? "checked" : ""} data-id="${c.id}"> ${c.icon} ${esc(c.name)}`;
+    el.appendChild(l);
+  });
+}
+renderCats();
+
+// ---------- Analyse ----------
+$("#run").addEventListener("click", analyze);
+
+async function analyze() {
+  const active = CATEGORIES.filter(c => $(`input[data-id="${c.id}"]`).checked);
+  if (!active.length) { setStatus("Mindestens eine Kategorie wählen."); return; }
+  $("#run").disabled = true;
+  poiLayer.clearLayers(); lineLayer.clearLayers();
+  const results = {}; // results[addrId][catId] = [{name,lat,lon,dist}, …]
+
+  try {
+    for (const [i, addr] of state.addresses.entries()) {
+      setStatus(`Suche Umgebung von ${addr.label} (${i + 1}/${state.addresses.length}) …`);
+      const parts = active.map(c =>
+        `nwr${c.filter}(around:${RADIUS_M},${addr.lat},${addr.lon});`).join("");
+      const query = `[out:json][timeout:30];( ${parts} );out center 400;`;
+      const res = await fetch("https://overpass-api.de/api/interpreter", {
+        method: "POST",
+        body: "data=" + encodeURIComponent(query),
+        headers: { "Content-Type": "application/x-www-form-urlencoded" }
+      });
+      if (!res.ok) throw new Error("Overpass-Anfrage fehlgeschlagen (" + res.status + ") – später erneut versuchen.");
+      const data = await res.json();
+
+      results[addr.id] = {};
+      for (const c of active) results[addr.id][c.id] = [];
+      for (const el of data.elements) {
+        const lat = el.lat ?? el.center?.lat, lon = el.lon ?? el.center?.lon;
+        if (lat == null) continue;
+        const cat = active.find(c => matchesFilter(el.tags || {}, c.filter));
+        if (!cat) continue;
+        results[addr.id][cat.id].push({
+          name: el.tags?.name || cat.name + " (ohne Namen)",
+          lat, lon,
+          dist: haversine(addr, { lat, lon })
+        });
+      }
+      for (const c of active) {
+        results[addr.id][c.id].sort((x, y) => x.dist - y.dist);
+        results[addr.id][c.id] = results[addr.id][c.id].slice(0, TOP_N);
+      }
+    }
+    state.results = { active, data: results };
+    renderMapResults();
+    renderTable();
+    setStatus("Fertig. Entfernungen sind Luftlinie; Fußweg/Fahrzeit folgen in v0.2.");
+  } catch (err) {
+    setStatus(err.message);
+  } finally {
+    $("#run").disabled = false;
+  }
+}
+
+function matchesFilter(tags, filter) {
+  const m = filter.match(/\["([^"]+)"="([^"]+)"\]/);
+  return m ? tags[m[1]] === m[2] : false;
+}
+
+// ---------- Ergebnis-Darstellung ----------
+function renderMapResults() {
+  const { active, data } = state.results;
+  for (const addr of state.addresses) {
+    for (const c of active) {
+      (data[addr.id][c.id] || []).forEach((p, idx) => {
+        const mk = L.marker([p.lat, p.lon], {
+          icon: L.divIcon({ className: "", html: `<div style="font-size:18px;filter:drop-shadow(0 1px 1px rgba(0,0,0,.4))">${c.icon}</div>`, iconSize: [20, 20], iconAnchor: [10, 10] })
+        }).bindPopup(`<b>${esc(p.name)}</b><br>${esc(c.name)}<br>${esc(addr.label)}: ${fmt(p.dist)} Luftlinie`);
+        mk.addTo(poiLayer);
+        if (idx === 0) {
+          L.polyline([[addr.lat, addr.lon], [p.lat, p.lon]],
+            { color: addr.color, weight: 2, dashArray: "5 6", opacity: .85 })
+            .bindTooltip(`${c.icon} ${fmt(p.dist)}`)
+            .addTo(lineLayer);
+        }
+      });
+    }
+  }
+}
+
+function renderTable() {
+  const { active, data } = state.results;
+  let html = "<table><thead><tr><th>Kategorie</th>";
+  for (const a of state.addresses) {
+    html += `<th><span class="dot" style="background:${a.color}"></span>${esc(a.label)}</th>`;
+  }
+  html += "</tr></thead><tbody>";
+  for (const c of active) {
+    const bests = state.addresses.map(a => data[a.id][c.id]?.[0]?.dist ?? Infinity);
+    const bestVal = Math.min(...bests);
+    html += `<tr><td>${c.icon} <b>${esc(c.name)}</b></td>`;
+    state.addresses.forEach((a, i) => {
+      const hit = data[a.id][c.id]?.[0];
+      if (!hit) {
+        html += `<td class="none">kein Treffer im Umkreis von ${RADIUS_M / 1000} km</td>`;
+      } else {
+        const best = bests[i] === bestVal && isFinite(bestVal) && state.addresses.length > 1;
+        html += `<td class="${best ? "best" : ""}"><span class="poi">${esc(hit.name)}</span><br><span class="dist">${fmt(hit.dist)} Luftlinie</span></td>`;
+      }
+    });
+    html += "</tr>";
+  }
+  html += "</tbody></table>";
+  $("#tableWrap").innerHTML = html;
+}
+</script>
+</body>
+</html>
