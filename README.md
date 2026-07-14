@@ -5,7 +5,7 @@ Lagequalität von Adressen vergleichen: Adressen eingeben, Kategorien (Supermark
 ## Testversion 0.2 – Umfang
 
 - Bis zu 5 Adressen mit Geocoding (Geoapify Geocoding API) und farbcodierten Markern
-- 9 vordefinierte Kategorien (Geoapify Places API, Datenbasis OpenStreetMap)
+- 11 vordefinierte Kategorien (inkl. Café und Restaurant) (Geoapify Places API, Datenbasis OpenStreetMap)
 - Nächstgelegene Treffer je Kategorie (Radius 2 km, Top 3)
 - Karte (Leaflet) mit Verbindungslinien zum jeweils nächsten Treffer
 - Vergleichstabelle mit Bestwert-Hervorhebung

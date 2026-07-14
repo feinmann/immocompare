@@ -63,7 +63,7 @@
 <body>
 <header>
   <h1>immo<span class="co">compare</span></h1>
-  <span>Testversion 0.2 · Entfernungen als Luftlinie · Daten: OpenStreetMap</span>
+  <span>Testversion 0.2.1 · Entfernungen als Luftlinie · Daten: OpenStreetMap</span>
 </header>
 
 <div class="layout">
@@ -100,7 +100,7 @@
 </div>
 
 <footer>
-  immocompare v0.2 · Geocoding &amp; POIs: Powered by <a href="https://www.geoapify.com/">Geoapify</a> · Daten: © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>-Mitwirkende · Routing (Fußweg/Fahrzeit) folgt in der nächsten Version.
+  immocompare v0.2.1 · Geocoding &amp; POIs: Powered by <a href="https://www.geoapify.com/">Geoapify</a> · Daten: © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>-Mitwirkende · Routing (Fußweg/Fahrzeit) folgt in der nächsten Version.
 </footer>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
@@ -123,6 +123,8 @@ const CATEGORIES = [
   { id:"kita",       name:"Kita",        gcat:"childcare.kindergarten",           icon:"🧸", on:false },
   { id:"schule",     name:"Schule",      gcat:"education.school",                 icon:"🎒", on:false },
   { id:"spielplatz", name:"Spielplatz",  gcat:"leisure.playground",               icon:"🛝", on:false },
+  { id:"cafe",       name:"Café",        gcat:"catering.cafe",                    icon:"☕", on:false },
+  { id:"restaurant", name:"Restaurant",  gcat:"catering.restaurant",              icon:"🍽️", on:false },
   { id:"oepnv",      name:"ÖPNV-Halt",   gcat:"public_transport",                 icon:"🚌", on:false },
   { id:"park",       name:"Park",        gcat:"leisure.park",                     icon:"🌳", on:false },
 ];
@@ -254,16 +256,16 @@ renderCats();
 // ---------- Analyse ----------
 $("#run").addEventListener("click", analyze);
 
-// Öffentliche Overpass-Instanzen; bei 429/504 wird automatisch rotiert.
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
-async function placesFetch(addr, cats) {
-  const catParam = cats.map(c => c.gcat).join(",");
+// Eine kleine Anfrage pro Kategorie: bias=proximity sortiert nach Entfernung,
+// limit=10 liefert garantiert die nächstgelegenen Treffer dieser Kategorie.
+async function placesFetch(addr, cat) {
   const url = "https://api.geoapify.com/v2/places"
-    + "?categories=" + encodeURIComponent(catParam)
+    + "?categories=" + encodeURIComponent(cat.gcat)
     + `&filter=circle:${addr.lon},${addr.lat},${RADIUS_M}`
     + `&bias=proximity:${addr.lon},${addr.lat}`
-    + "&limit=100&lang=de&apiKey=" + GEOAPIFY_KEY;
+    + "&limit=10&lang=de&apiKey=" + GEOAPIFY_KEY;
   for (let attempt = 0; attempt < 3; attempt++) {
     const res = await fetch(url);
     if (res.ok) return res.json();
@@ -271,13 +273,6 @@ async function placesFetch(addr, cats) {
     throw new Error("POI-Suche fehlgeschlagen (HTTP " + res.status + ").");
   }
   throw new Error("POI-Suche: Rate Limit erreicht – bitte kurz warten und erneut versuchen.");
-}
-
-// Ordnet ein Places-Ergebnis der ersten passenden aktiven Kategorie zu.
-function classify(featureCats, active) {
-  return active.find(c =>
-    (featureCats || []).some(fc => fc === c.gcat || fc.startsWith(c.gcat + "."))
-  );
 }
 
 async function analyze() {
@@ -294,27 +289,23 @@ async function analyze() {
   }
 
   try {
-    // Eine Anfrage pro Adresse, alle aktiven Kategorien gebündelt.
-    for (const [i, addr] of state.addresses.entries()) {
-      setStatus(`Suche Umgebung von ${addr.label} (${i + 1}/${state.addresses.length}) …`);
-      const data = await placesFetch(addr, active);
-      for (const f of (data.features || [])) {
-        const p = f.properties || {};
-        if (p.lat == null || p.lon == null) continue;
-        const cat = classify(p.categories, active);
-        if (!cat) continue;
-        results[addr.id][cat.id].push({
-          name: p.name || p.address_line1 || cat.name + " (ohne Namen)",
-          lat: p.lat, lon: p.lon,
-          dist: haversine(addr, { lat: p.lat, lon: p.lon })
-        });
-      }
-    }
-
-    for (const a of state.addresses) {
-      for (const c of active) {
-        results[a.id][c.id].sort((x, y) => x.dist - y.dist);
-        results[a.id][c.id] = results[a.id][c.id].slice(0, TOP_N);
+    const total = state.addresses.length * active.length;
+    let done = 0;
+    for (const addr of state.addresses) {
+      for (const cat of active) {
+        setStatus(`Suche ${cat.name} bei ${addr.label} (${++done}/${total}) …`);
+        const data = await placesFetch(addr, cat);
+        results[addr.id][cat.id] = (data.features || [])
+          .map(f => f.properties || {})
+          .filter(p => p.lat != null && p.lon != null)
+          .map(p => ({
+            name: p.name || p.address_line1 || cat.name + " (ohne Namen)",
+            lat: p.lat, lon: p.lon,
+            dist: haversine(addr, { lat: p.lat, lon: p.lon })
+          }))
+          .sort((x, y) => x.dist - y.dist)
+          .slice(0, TOP_N);
+        await sleep(150); // Rate Limit des Free-Plans nicht reizen
       }
     }
     state.results = { active, data: results };
