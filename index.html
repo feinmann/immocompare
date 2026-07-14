@@ -63,7 +63,7 @@
 <body>
 <header>
   <h1>immo<span class="co">compare</span></h1>
-  <span>Testversion 0.1 · Entfernungen als Luftlinie · Daten: OpenStreetMap</span>
+  <span>Testversion 0.1.1 · Entfernungen als Luftlinie · Daten: OpenStreetMap</span>
 </header>
 
 <div class="layout">
@@ -100,7 +100,7 @@
 </div>
 
 <footer>
-  immocompare v0.1 · Geocoding: Nominatim · POIs: Overpass API · Karte: © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>-Mitwirkende · Routing (Fußweg/Fahrzeit) folgt in der nächsten Version.
+  immocompare v0.1.1 · Geocoding: Nominatim · POIs: Overpass API · Karte: © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>-Mitwirkende · Routing (Fußweg/Fahrzeit) folgt in der nächsten Version.
 </footer>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
@@ -246,43 +246,93 @@ renderCats();
 // ---------- Analyse ----------
 $("#run").addEventListener("click", analyze);
 
+// Öffentliche Overpass-Instanzen; bei 429/504 wird automatisch rotiert.
+const OVERPASS_ENDPOINTS = [
+  "https://overpass-api.de/api/interpreter",
+  "https://overpass.kumi.systems/api/interpreter",
+  "https://overpass.private.coffee/api/interpreter"
+];
+const CHUNK_SIZE = 3;        // Kategorien pro Overpass-Anfrage (klein halten → kein 504)
+const CHUNK_PAUSE_MS = 1500; // Pause zwischen Anfragen (Rate Limit → kein 429)
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+async function overpassFetch(query, onInfo) {
+  let lastErr = "";
+  for (let attempt = 0; attempt < OVERPASS_ENDPOINTS.length * 2; attempt++) {
+    const ep = OVERPASS_ENDPOINTS[attempt % OVERPASS_ENDPOINTS.length];
+    try {
+      const res = await fetch(ep, {
+        method: "POST",
+        body: "data=" + encodeURIComponent(query),
+        headers: { "Content-Type": "application/x-www-form-urlencoded" }
+      });
+      if (res.ok) return res.json();
+      lastErr = "HTTP " + res.status;
+      if (res.status === 429 || res.status === 504) {
+        const wait = 2000 * (attempt + 1);
+        onInfo(`Server ausgelastet (${res.status}) – neuer Versuch in ${wait / 1000}s …`);
+        await sleep(wait);
+        continue; // nächster Endpoint
+      }
+      throw new Error("Overpass-Anfrage fehlgeschlagen (" + res.status + ").");
+    } catch (e) {
+      lastErr = e.message;
+      await sleep(1500);
+    }
+  }
+  throw new Error("Alle Overpass-Server ausgelastet (" + lastErr + ") – bitte in 1–2 Minuten erneut versuchen.");
+}
+
 async function analyze() {
   const active = CATEGORIES.filter(c => $(`input[data-id="${c.id}"]`).checked);
   if (!active.length) { setStatus("Mindestens eine Kategorie wählen."); return; }
   $("#run").disabled = true;
   poiLayer.clearLayers(); lineLayer.clearLayers();
-  const results = {}; // results[addrId][catId] = [{name,lat,lon,dist}, …]
+
+  // results[addrId][catId] = [{name,lat,lon,dist}, …]
+  const results = {};
+  for (const a of state.addresses) {
+    results[a.id] = {};
+    for (const c of active) results[a.id][c.id] = [];
+  }
+
+  // Kategorien in kleine Pakete teilen; je Paket EINE Anfrage für ALLE Adressen.
+  const chunks = [];
+  for (let i = 0; i < active.length; i += CHUNK_SIZE) chunks.push(active.slice(i, i + CHUNK_SIZE));
 
   try {
-    for (const [i, addr] of state.addresses.entries()) {
-      setStatus(`Suche Umgebung von ${addr.label} (${i + 1}/${state.addresses.length}) …`);
-      const parts = active.map(c =>
-        `nwr${c.filter}(around:${RADIUS_M},${addr.lat},${addr.lon});`).join("");
-      const query = `[out:json][timeout:30];( ${parts} );out center 400;`;
-      const res = await fetch("https://overpass-api.de/api/interpreter", {
-        method: "POST",
-        body: "data=" + encodeURIComponent(query),
-        headers: { "Content-Type": "application/x-www-form-urlencoded" }
-      });
-      if (!res.ok) throw new Error("Overpass-Anfrage fehlgeschlagen (" + res.status + ") – später erneut versuchen.");
-      const data = await res.json();
+    const seen = new Set();
+    for (const [ci, chunk] of chunks.entries()) {
+      setStatus(`Suche ${chunk.map(c => c.name).join(", ")} (${ci + 1}/${chunks.length}) …`);
+      const parts = chunk.flatMap(c =>
+        state.addresses.map(a => `nwr${c.filter}(around:${RADIUS_M},${a.lat},${a.lon});`)
+      ).join("");
+      const query = `[out:json][timeout:60];( ${parts} );out center 600;`;
+      const data = await overpassFetch(query, setStatus);
 
-      results[addr.id] = {};
-      for (const c of active) results[addr.id][c.id] = [];
       for (const el of data.elements) {
+        const key = el.type + "/" + el.id;
+        if (seen.has(key)) continue;
+        seen.add(key);
         const lat = el.lat ?? el.center?.lat, lon = el.lon ?? el.center?.lon;
         if (lat == null) continue;
-        const cat = active.find(c => matchesFilter(el.tags || {}, c.filter));
+        const cat = chunk.find(c => matchesFilter(el.tags || {}, c.filter));
         if (!cat) continue;
-        results[addr.id][cat.id].push({
-          name: el.tags?.name || cat.name + " (ohne Namen)",
-          lat, lon,
-          dist: haversine(addr, { lat, lon })
-        });
+        // Ein POI kann im Radius mehrerer Adressen liegen → allen zuordnen.
+        for (const a of state.addresses) {
+          const dist = haversine(a, { lat, lon });
+          if (dist <= RADIUS_M) {
+            results[a.id][cat.id].push({ name: el.tags?.name || cat.name + " (ohne Namen)", lat, lon, dist });
+          }
+        }
       }
+      if (ci < chunks.length - 1) await sleep(CHUNK_PAUSE_MS);
+    }
+
+    for (const a of state.addresses) {
       for (const c of active) {
-        results[addr.id][c.id].sort((x, y) => x.dist - y.dist);
-        results[addr.id][c.id] = results[addr.id][c.id].slice(0, TOP_N);
+        results[a.id][c.id].sort((x, y) => x.dist - y.dist);
+        results[a.id][c.id] = results[a.id][c.id].slice(0, TOP_N);
       }
     }
     state.results = { active, data: results };
