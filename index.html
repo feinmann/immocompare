@@ -63,7 +63,7 @@
 <body>
 <header>
   <h1>immo<span class="co">compare</span></h1>
-  <span>Testversion 0.4 · Fußweg-, Auto- &amp; Radzeiten (Sieger: Fußweg) · Daten: OpenStreetMap</span>
+  <span>Testversion 0.5 · Fußweg-, Auto- &amp; Radzeiten (Sieger: Fußweg) · Daten: OpenStreetMap</span>
 </header>
 
 <div class="layout">
@@ -100,7 +100,7 @@
 </div>
 
 <footer>
-  immocompare v0.4 · Geocoding &amp; POIs: Powered by <a href="https://www.geoapify.com/">Geoapify</a> · Daten: © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>-Mitwirkende · Routing: Geoapify Route Matrix API.
+  immocompare v0.5 · Geocoding &amp; POIs: Powered by <a href="https://www.geoapify.com/">Geoapify</a> · Daten: © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>-Mitwirkende · Routing: Geoapify Route Matrix API.
 </footer>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
@@ -120,12 +120,15 @@ const CATEGORIES = [
   { id:"baecker",    name:"Bäckerei",    gcat:"commercial.food_and_drink.bakery", icon:"🥐", on:false },
   { id:"apotheke",   name:"Apotheke",    gcat:"healthcare.pharmacy",              icon:"💊", on:true },
   { id:"arzt",       name:"Arztpraxis",  gcat:"healthcare.clinic_or_praxis",      icon:"🩺", on:false },
+  { id:"kinderarzt", name:"Kinderarzt",  gcat:"healthcare.clinic_or_praxis.paediatrics", icon:"👶", on:false },
   { id:"kita",       name:"Kita",        gcat:"childcare.kindergarten",           icon:"🧸", on:false },
   { id:"schule",     name:"Schule",      gcat:"education.school",                 icon:"🎒", on:false },
   { id:"spielplatz", name:"Spielplatz",  gcat:"leisure.playground",               icon:"🛝", on:false },
   { id:"cafe",       name:"Café",        gcat:"catering.cafe",                    icon:"☕", on:false },
   { id:"restaurant", name:"Restaurant",  gcat:"catering.restaurant",              icon:"🍽️", on:false },
-  { id:"baden",      name:"Bad/Badesee", gcat:"sport.swimming_pool,beach,leisure.spa.public_bath", icon:"🏊", on:false },
+  { id:"tennis",     name:"Tennis",      gcat:"sport.pitch,sport.sports_centre,activity.sport_club", nameFilter:"tennis", icon:"🎾", on:false },
+  { id:"schwimmbad", name:"Schwimmbad",  gcat:"sport.swimming_pool,leisure.spa.public_bath", icon:"🏊", on:false },
+  { id:"see",        name:"See/Badestelle", gcat:"natural.water,beach",           icon:"🏞️", on:false },
   { id:"oepnv",      name:"ÖPNV-Halt",   gcat:"public_transport",                 icon:"🚌", on:false },
   { id:"park",       name:"Park",        gcat:"leisure.park",                     icon:"🌳", on:false },
 ];
@@ -297,6 +300,7 @@ async function placesFetch(addr, cat) {
     + "?categories=" + cat.gcat.split(",").map(encodeURIComponent).join(",")
     + `&filter=circle:${addr.lon},${addr.lat},${RADIUS_M}`
     + `&bias=proximity:${addr.lon},${addr.lat}`
+    + (cat.nameFilter ? "&name=" + encodeURIComponent(cat.nameFilter) : "")
     + "&limit=10&lang=de&apiKey=" + GEOAPIFY_KEY;
   for (let attempt = 0; attempt < 3; attempt++) {
     const res = await fetch(url);
